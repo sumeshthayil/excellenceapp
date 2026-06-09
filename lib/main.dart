@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'login_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,26 +19,22 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Excellence Maths Tutoring',
+      title: 'Excellence Tutoring',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
       home: const LoginPage(),
-    );
-  }
-}
-
-class LoginPage extends StatelessWidget {
-  const LoginPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: Text('Login page coming next!'),
-      ),
+      routes: {
+        '/login': (context) => const LoginPage(),
+        '/student': (context) => const Scaffold(
+              body: Center(child: Text('Student home coming soon!')),
+            ),
+        '/admin': (context) => const Scaffold(
+              body: Center(child: Text('Admin home coming soon!')),
+            ),
+      },
     );
   }
 }
