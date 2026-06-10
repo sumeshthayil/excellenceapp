@@ -90,107 +90,120 @@ class _StudentChatPageState extends State<StudentChatPage> {
     }
   }
 
-  Future<void> _sendImage() async {
-    final picked = await _imagePicker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-    );
-    if (picked == null) return;
+Future<void> _sendImage() async {
+  final picked = await _imagePicker.pickImage(
+    source: ImageSource.gallery,
+    imageQuality: 70,
+  );
+  if (picked == null) return;
 
-    setState(() => _isSending = true);
+  setState(() => _isSending = true);
 
-    try {
-      final userId = supabase.auth.currentUser!.id;
-      final file = File(picked.path);
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
-      final filePath = '$userId/$fileName';
+  try {
+    final userId = supabase.auth.currentUser!.id;
+    final file = File(picked.path);
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
+    final filePath = '$userId/$fileName';
 
-      await supabase.storage
-          .from('channel-files')
-          .upload(filePath, file);
-
-      await supabase.from('messages').insert({
-        'student_id': userId,
-        'sent_by': userId,
-        'sender_role': 'student',
-        'file_name': picked.name,
-        'file_path': filePath,
-        'file_type': 'image',
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send image: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
-  }
-
-  String _getImageUrl(String filePath) {
-    return supabase.storage
+    await supabase.storage
         .from('channel-files')
-        .getPublicUrl(filePath);
+        .upload(filePath, file);
+
+    final newMessage = {
+      'student_id': userId,
+      'sent_by': userId,
+      'sender_role': 'student',
+      'file_name': picked.name,
+      'file_path': filePath,
+      'file_type': 'image',
+      'created_at': DateTime.now().toIso8601String(),
+    };
+
+    await supabase.from('messages').insert(newMessage);
+
+    // Add to local list immediately
+    setState(() => _messages.add(newMessage));
+    _scrollToBottom();
+  } catch (e, stackTrace) {
+    print('Image send error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  } finally {
+    if (mounted) setState(() => _isSending = false);
   }
+}
 
-  Widget _buildMessage(Map<String, dynamic> message) {
-    final isStudent = message['sender_role'] == 'student';
-    final hasText = message['text_content'] != null;
-    final hasImage = message['file_type'] == 'image' && message['file_path'] != null;
+Future<String> _getSignedUrl(String filePath) async {
+  final response = await supabase.storage
+      .from('channel-files')
+      .createSignedUrl(filePath, 60 * 60);
+  return response;
+}
 
-    return Align(
-      alignment: isStudent ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: isStudent ? Colors.blue : Colors.grey[200],
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isStudent ? 16 : 4),
-            bottomRight: Radius.circular(isStudent ? 4 : 16),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (hasImage)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    _getImageUrl(message['file_path']),
-                    fit: BoxFit.cover,
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      return const SizedBox(
-                        height: 150,
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    },
-                    errorBuilder: (context, error, stackTrace) =>
-                        const Icon(Icons.broken_image),
-                  ),
-                ),
-              if (hasText)
-                Text(
-                  message['text_content'],
-                  style: TextStyle(
-                    color: isStudent ? Colors.white : Colors.black87,
-                    fontSize: 15,
-                  ),
-                ),
-            ],
-          ),
+Widget _buildMessage(Map<String, dynamic> message) {
+  final isStudent = message['sender_role'] == 'student';
+  final hasText = message['text_content'] != null;
+  final hasImage = message['file_type'] == 'image' && message['file_path'] != null;
+
+  return Align(
+    alignment: isStudent ? Alignment.centerRight : Alignment.centerLeft,
+    child: Container(
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.75,
+      ),
+      decoration: BoxDecoration(
+        color: isStudent ? Colors.blue : Colors.grey[200],
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(16),
+          topRight: const Radius.circular(16),
+          bottomLeft: Radius.circular(isStudent ? 16 : 4),
+          bottomRight: Radius.circular(isStudent ? 4 : 16),
         ),
       ),
-    );
-  }
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasImage)
+              FutureBuilder<String>(
+                future: _getSignedUrl(message['file_path']),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const SizedBox(
+                      height: 150,
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      snapshot.data!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(Icons.broken_image),
+                    ),
+                  );
+                },
+              ),
+            if (hasText)
+              Text(
+                message['text_content'],
+                style: TextStyle(
+                  color: isStudent ? Colors.white : Colors.black87,
+                  fontSize: 15,
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
 
   @override
   void dispose() {
