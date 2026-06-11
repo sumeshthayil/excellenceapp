@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_page.dart';
 import 'student_chat_page.dart';
+import 'admin_home_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,9 +31,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/login': (context) => const LoginPage(),
         '/student': (context) => const StudentChatPage(),
-        '/admin': (context) => const Scaffold(
-              body: Center(child: Text('Admin home coming soon!')),
-            ),
+        '/admin': (context) => const AdminHomePage(),
       },
     );
   }
