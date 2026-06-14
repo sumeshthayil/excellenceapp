@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:file_selector/file_selector.dart';
 
 class StudentChatPage extends StatefulWidget {
   const StudentChatPage({super.key});
@@ -136,6 +137,52 @@ Future<void> _sendImage() async {
   }
 }
 
+Future<void> _sendFile() async {
+  const typeGroup = XTypeGroup(
+    label: 'files',
+    extensions: ['pdf', 'doc', 'docx', 'txt'],
+  );
+
+  final file = await openFile(acceptedTypeGroups: [typeGroup]);
+  if (file == null) return;
+
+  setState(() => _isSending = true);
+
+  try {
+    final userId = supabase.auth.currentUser!.id;
+    final bytes = await file.readAsBytes();
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+    final filePath = '$userId/$fileName';
+
+    await supabase.storage
+        .from('channel-files')
+        .uploadBinary(filePath, bytes);
+
+    final newMessage = {
+      'student_id': userId,
+      'sent_by': userId,
+      'sender_role': 'student',
+      'file_name': file.name,
+      'file_path': filePath,
+      'file_type': 'file',
+      'created_at': DateTime.now().toIso8601String(),
+    };
+
+    await supabase.from('messages').insert(newMessage);
+    setState(() => _messages.add(newMessage));
+    _scrollToBottom();
+  } catch (e) {
+    print('File send error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  } finally {
+    if (mounted) setState(() => _isSending = false);
+  }
+}
+
 Future<String> _getSignedUrl(String filePath) async {
   final response = await supabase.storage
       .from('channel-files')
@@ -147,6 +194,7 @@ Widget _buildMessage(Map<String, dynamic> message) {
   final isStudent = message['sender_role'] == 'student';
   final hasText = message['text_content'] != null;
   final hasImage = message['file_type'] == 'image' && message['file_path'] != null;
+  final hasFile = message['file_type'] == 'file' && message['file_path'] != null;
 
   return Align(
     alignment: isStudent ? Alignment.centerRight : Alignment.centerLeft,
@@ -190,6 +238,26 @@ Widget _buildMessage(Map<String, dynamic> message) {
                   );
                 },
               ),
+            if (hasFile)
+  Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        Icons.insert_drive_file_outlined,
+        color: isStudent ? Colors.white : Colors.blue,
+      ),
+      const SizedBox(width: 8),
+      Flexible(
+        child: Text(
+          message['file_name'] ?? 'File',
+          style: TextStyle(
+            color: isStudent ? Colors.white : Colors.black87,
+            decoration: TextDecoration.underline,
+          ),
+        ),
+      ),
+    ],
+  ),
             if (hasText)
               Text(
                 message['text_content'],
@@ -197,6 +265,26 @@ Widget _buildMessage(Map<String, dynamic> message) {
                   color: isStudent ? Colors.white : Colors.black87,
                   fontSize: 15,
                 ),
+              ),
+            if (hasFile)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.insert_drive_file_outlined,
+                    color: isStudent ? Colors.white : Colors.blue,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      message['file_name'] ?? 'File',
+                      style: TextStyle(
+                        color: isStudent ? Colors.white : Colors.black87,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
+                ],
               ),
           ],
         ),
@@ -273,6 +361,11 @@ Widget _buildMessage(Map<String, dynamic> message) {
                 IconButton(
                   icon: const Icon(Icons.photo_outlined, color: Colors.blue),
                   onPressed: _isSending ? null : _sendImage,
+                ),
+                // Attach file button
+                IconButton(
+                  icon: const Icon(Icons.attach_file, color: Colors.blue),
+                  onPressed: _isSending ? null : _sendFile,
                 ),
 
                 // Text input
