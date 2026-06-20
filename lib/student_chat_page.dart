@@ -22,7 +22,6 @@ class _StudentChatPageState extends State<StudentChatPage> {
   @override
   void initState() {
     super.initState();
-    _loadMessages();
     _subscribeToMessages();
   }
 
@@ -123,8 +122,6 @@ Future<void> _sendImage() async {
     await supabase.from('messages').insert(newMessage);
 
     // Add to local list immediately
-    setState(() => _messages.add(newMessage));
-    _scrollToBottom();
   } catch (e, stackTrace) {
     print('Image send error: $e');
     if (mounted) {
@@ -169,8 +166,6 @@ Future<void> _sendFile() async {
     };
 
     await supabase.from('messages').insert(newMessage);
-    setState(() => _messages.add(newMessage));
-    _scrollToBottom();
   } catch (e) {
     print('File send error: $e');
     if (mounted) {
@@ -239,34 +234,6 @@ Widget _buildMessage(Map<String, dynamic> message) {
                 },
               ),
             if (hasFile)
-  Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(
-        Icons.insert_drive_file_outlined,
-        color: isStudent ? Colors.white : Colors.blue,
-      ),
-      const SizedBox(width: 8),
-      Flexible(
-        child: Text(
-          message['file_name'] ?? 'File',
-          style: TextStyle(
-            color: isStudent ? Colors.white : Colors.black87,
-            decoration: TextDecoration.underline,
-          ),
-        ),
-      ),
-    ],
-  ),
-            if (hasText)
-              Text(
-                message['text_content'],
-                style: TextStyle(
-                  color: isStudent ? Colors.white : Colors.black87,
-                  fontSize: 15,
-                ),
-              ),
-            if (hasFile)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -285,6 +252,14 @@ Widget _buildMessage(Map<String, dynamic> message) {
                     ),
                   ),
                 ],
+              ),
+            if (hasText)
+              Text(
+                message['text_content'],
+                style: TextStyle(
+                  color: isStudent ? Colors.white : Colors.black87,
+                  fontSize: 15,
+                ),
               ),
           ],
         ),

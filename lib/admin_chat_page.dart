@@ -29,7 +29,6 @@ class _AdminChatPageState extends State<AdminChatPage> {
   @override
   void initState() {
     super.initState();
-    _loadMessages();
     _subscribeToMessages();
   }
 
@@ -86,8 +85,6 @@ class _AdminChatPageState extends State<AdminChatPage> {
       };
 
       await supabase.from('messages').insert(newMessage);
-      setState(() => _messages.add(newMessage));
-      _scrollToBottom();
     } catch (e) {
       print('Send error: $e');
       if (mounted) {
@@ -120,7 +117,7 @@ class _AdminChatPageState extends State<AdminChatPage> {
           .upload(filePath, file);
 
       final newMessage = {
-        'student_id': widget.studentId,
+        'student_id': widget.studentId,  // was adminId, now correct
         'sent_by': adminId,
         'sender_role': 'admin',
         'file_name': picked.name,
@@ -130,8 +127,6 @@ class _AdminChatPageState extends State<AdminChatPage> {
       };
 
       await supabase.from('messages').insert(newMessage);
-      setState(() => _messages.add(newMessage));
-      _scrollToBottom();
     } catch (e) {
       print('Image send error: $e');
       if (mounted) {
@@ -155,18 +150,18 @@ Future<void> _sendFile() async {
   setState(() => _isSending = true);
 
   try {
-    final userId = supabase.auth.currentUser!.id;
+    final adminId = supabase.auth.currentUser!.id;
     final bytes = await file.readAsBytes();
     final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
-    final filePath = '$userId/$fileName';
+    final filePath = '$adminId/$fileName';
 
     await supabase.storage
         .from('channel-files')
         .uploadBinary(filePath, bytes);
 
     final newMessage = {
-      'student_id': userId,
-      'sent_by': userId,
+      'student_id': widget.studentId,  // was adminId, now correct
+      'sent_by': adminId,
       'sender_role': 'admin',
       'file_name': file.name,
       'file_path': filePath,
@@ -175,8 +170,6 @@ Future<void> _sendFile() async {
     };
 
     await supabase.from('messages').insert(newMessage);
-    setState(() => _messages.add(newMessage));
-    _scrollToBottom();
   } catch (e) {
     print('File send error: $e');
     if (mounted) {
