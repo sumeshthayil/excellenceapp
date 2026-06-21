@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/services.dart';
 
 class AdminChatPage extends StatefulWidget {
   final String studentId;
@@ -32,6 +35,66 @@ class _AdminChatPageState extends State<AdminChatPage> {
     _subscribeToMessages();
   }
 
+  Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
+  try {
+    // Only request permission on Android 12 and below
+    final androidVersion = await _getAndroidVersion();
+    if (androidVersion <= 32) {
+      final status = await Permission.storage.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Storage permission denied')),
+          );
+        }
+        return;
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Downloading file...')),
+      );
+    }
+
+    final bytes = await supabase.storage
+        .from('channel-files')
+        .download(filePath);
+
+    final downloadsDir = Directory('/storage/emulated/0/Download/ExcellenceTutoring');
+    if (!await downloadsDir.exists()) {
+      await downloadsDir.create(recursive: true);
+    }
+
+    final localFile = File('${downloadsDir.path}/$fileName');
+    await localFile.writeAsBytes(bytes);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved to Downloads: $fileName')),
+      );
+    }
+
+    await OpenFilex.open(localFile.path);
+  } catch (e) {
+    print('Download error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+}
+
+Future<int> _getAndroidVersion() async {
+  try {
+    final version = await const MethodChannel('flutter/platform')
+        .invokeMethod<String>('getAndroidVersion');
+    return int.tryParse(version ?? '33') ?? 33;
+  } catch (_) {
+    return 33; // assume modern Android if unknown
+  }
+}
   Future<void> _loadMessages() async {
     final data = await supabase
         .from('messages')
@@ -240,24 +303,30 @@ Future<void> _sendFile() async {
                   },
                 ),
               if (hasFile)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.insert_drive_file_outlined,
-                      color: isAdmin ? Colors.white : Colors.blue,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        message['file_name'] ?? 'File',
-                        style: TextStyle(
-                          color: isAdmin ? Colors.white : Colors.black87,
-                          decoration: TextDecoration.underline,
+                GestureDetector(
+                  onTap: () => _downloadAndOpenFile(
+                    message['file_path'],
+                    message['file_name'] ?? 'file',
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.insert_drive_file_outlined,
+                        color: isAdmin ? Colors.white : Colors.blue,
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          message['file_name'] ?? 'File',
+                          style: TextStyle(
+                            color: isAdmin ? Colors.white : Colors.black87,
+                            decoration: TextDecoration.underline,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               if (hasText)
                 Text(

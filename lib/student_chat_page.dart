@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/services.dart';
 
 class StudentChatPage extends StatefulWidget {
   const StudentChatPage({super.key});
@@ -25,6 +28,66 @@ class _StudentChatPageState extends State<StudentChatPage> {
     _subscribeToMessages();
   }
 
+  Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
+  try {
+    // Only request permission on Android 12 and below
+    final androidVersion = await _getAndroidVersion();
+    if (androidVersion <= 32) {
+      final status = await Permission.storage.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Storage permission denied')),
+          );
+        }
+        return;
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Downloading file...')),
+      );
+    }
+
+    final bytes = await supabase.storage
+        .from('channel-files')
+        .download(filePath);
+
+    final downloadsDir = Directory('/storage/emulated/0/Download/ExcellenceTutoring');
+    if (!await downloadsDir.exists()) {
+      await downloadsDir.create(recursive: true);
+    }
+
+    final localFile = File('${downloadsDir.path}/$fileName');
+    await localFile.writeAsBytes(bytes);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved to Downloads: $fileName')),
+      );
+    }
+
+    await OpenFilex.open(localFile.path);
+  } catch (e) {
+    print('Download error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+}
+
+Future<int> _getAndroidVersion() async {
+  try {
+    final version = await const MethodChannel('flutter/platform')
+        .invokeMethod<String>('getAndroidVersion');
+    return int.tryParse(version ?? '33') ?? 33;
+  } catch (_) {
+    return 33; // assume modern Android if unknown
+  }
+}
   Future<void> _loadMessages() async {
     final userId = supabase.auth.currentUser!.id;
     final data = await supabase
@@ -78,14 +141,14 @@ class _StudentChatPageState extends State<StudentChatPage> {
         'text_content': text,
       });
     } catch (e, stackTrace) {
-  print('Send error: $e');
-  print('Stack trace: $stackTrace');
-  if (mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error: $e')),
-    );
-  }
-} finally {
+    print('Send error: $e');
+    print('Stack trace: $stackTrace');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    } 
+    } finally {
       if (mounted) setState(() => _isSending = false);
     }
   }
@@ -234,24 +297,30 @@ Widget _buildMessage(Map<String, dynamic> message) {
                 },
               ),
             if (hasFile)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.insert_drive_file_outlined,
-                    color: isStudent ? Colors.white : Colors.blue,
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      message['file_name'] ?? 'File',
-                      style: TextStyle(
-                        color: isStudent ? Colors.white : Colors.black87,
-                        decoration: TextDecoration.underline,
+              GestureDetector(
+                onTap: () => _downloadAndOpenFile(
+                  message['file_path'],
+                  message['file_name'] ?? 'file',
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.insert_drive_file_outlined,
+                      color: isStudent ? Colors.white : Colors.blue,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        message['file_name'] ?? 'File',
+                        style: TextStyle(
+                          color: isStudent ? Colors.white : Colors.black87,
+                          decoration: TextDecoration.underline,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             if (hasText)
               Text(
@@ -268,115 +337,115 @@ Widget _buildMessage(Map<String, dynamic> message) {
   );
 }
 
-  @override
-  void dispose() {
-    _messageController.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
+@override
+void dispose() {
+  _messageController.dispose();
+  _scrollController.dispose();
+  super.dispose();
+}
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Excellence Tutoring'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-        automaticallyImplyLeading: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await supabase.auth.signOut();
-              if (mounted) {
-                Navigator.pushReplacementNamed(context, '/login');
-              }
-            },
-          ),
-        ],
-      ),
-      body: SafeArea(
-      child: Column(
-        children: [
-          // Messages list
-          Expanded(
-            child: _messages.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No messages yet.\nSend a message or photo to get started!',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, index) =>
-                        _buildMessage(_messages[index]),
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    appBar: AppBar(
+      title: const Text('Excellence Tutoring'),
+      backgroundColor: Colors.blue,
+      foregroundColor: Colors.white,
+      automaticallyImplyLeading: false,
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.logout),
+          onPressed: () async {
+            await supabase.auth.signOut();
+            if (mounted) {
+              Navigator.pushReplacementNamed(context, '/login');
+            }
+          },
+        ),
+      ],
+    ),
+    body: SafeArea(
+    child: Column(
+      children: [
+        // Messages list
+        Expanded(
+          child: _messages.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No messages yet.\nSend a message or photo to get started!',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey),
                   ),
+                )
+              : ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: _messages.length,
+                  itemBuilder: (context, index) =>
+                      _buildMessage(_messages[index]),
+                ),
+        ),
+
+        // Input bar
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(
+            children: [
+              // Attach image button
+              IconButton(
+                icon: const Icon(Icons.photo_outlined, color: Colors.blue),
+                onPressed: _isSending ? null : _sendImage,
+              ),
+              // Attach file button
+              IconButton(
+                icon: const Icon(Icons.attach_file, color: Colors.blue),
+                onPressed: _isSending ? null : _sendFile,
+              ),
 
-          // Input bar
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 4,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: Row(
-              children: [
-                // Attach image button
-                IconButton(
-                  icon: const Icon(Icons.photo_outlined, color: Colors.blue),
-                  onPressed: _isSending ? null : _sendImage,
-                ),
-                // Attach file button
-                IconButton(
-                  icon: const Icon(Icons.attach_file, color: Colors.blue),
-                  onPressed: _isSending ? null : _sendFile,
-                ),
-
-                // Text input
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    decoration: InputDecoration(
-                      hintText: 'Type a message...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
+              // Text input
+              Expanded(
+                child: TextField(
+                  controller: _messageController,
+                  decoration: InputDecoration(
+                    hintText: 'Type a message...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
                     ),
-                    textCapitalization: TextCapitalization.sentences,
-                    maxLines: null,
-                    onSubmitted: (_) => _sendTextMessage(),
+                    filled: true,
+                    fillColor: Colors.grey[100],
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
                   ),
+                  textCapitalization: TextCapitalization.sentences,
+                  maxLines: null,
+                  onSubmitted: (_) => _sendTextMessage(),
                 ),
+              ),
 
-                // Send button
-                IconButton(
-                  icon: const Icon(Icons.send, color: Colors.blue),
-                  onPressed: _isSending ? null : _sendTextMessage,
-                ),
-              ],
-            ),
+              // Send button
+              IconButton(
+                icon: const Icon(Icons.send, color: Colors.blue),
+                onPressed: _isSending ? null : _sendTextMessage,
+              ),
+            ],
           ),
-        ],
-      ),
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+    ),
+  );
+}
 }
