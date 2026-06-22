@@ -5,7 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter/services.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 class StudentChatPage extends StatefulWidget {
   const StudentChatPage({super.key});
@@ -28,11 +28,14 @@ class _StudentChatPageState extends State<StudentChatPage> {
     _subscribeToMessages();
   }
 
-  Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
+Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
   try {
     // Only request permission on Android 12 and below
-    final androidVersion = await _getAndroidVersion();
-    if (androidVersion <= 32) {
+    final deviceInfo = DeviceInfoPlugin();
+    final androidInfo = await deviceInfo.androidInfo;
+    final sdkVersion = androidInfo.version.sdkInt;
+
+    if (sdkVersion <= 32) {
       final status = await Permission.storage.request();
       if (!status.isGranted) {
         if (mounted) {
@@ -79,15 +82,6 @@ class _StudentChatPageState extends State<StudentChatPage> {
   }
 }
 
-Future<int> _getAndroidVersion() async {
-  try {
-    final version = await const MethodChannel('flutter/platform')
-        .invokeMethod<String>('getAndroidVersion');
-    return int.tryParse(version ?? '33') ?? 33;
-  } catch (_) {
-    return 33; // assume modern Android if unknown
-  }
-}
   Future<void> _loadMessages() async {
     final userId = supabase.auth.currentUser!.id;
     final data = await supabase
