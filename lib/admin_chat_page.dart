@@ -4,8 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:open_filex/open_filex.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:device_info_plus/device_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 class AdminChatPage extends StatefulWidget {
   final String studentId;
@@ -35,69 +34,44 @@ class _AdminChatPageState extends State<AdminChatPage> {
     _subscribeToMessages();
   }
 
-Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
-  try {
-    // Only request permission on Android 12 and below
-    final deviceInfo = DeviceInfoPlugin();
-    final androidInfo = await deviceInfo.androidInfo;
-    final sdkVersion = androidInfo.version.sdkInt;
+  Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Downloading file...')),
+        );
+      }
 
-    if (sdkVersion <= 32) {
-      final status = await Permission.storage.request();
-      if (!status.isGranted) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Storage permission denied')),
-          );
-        }
-        return;
+      final bytes = await supabase.storage
+          .from('channel-files')
+          .download(filePath);
+
+      // Use app cache directory — no permissions needed on any Android version
+      final cacheDir = Directory(
+        '${(await getTemporaryDirectory()).path}/ExcellenceTutoring',
+      );
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+
+      final localFile = File('${cacheDir.path}/$fileName');
+      await localFile.writeAsBytes(bytes);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Opening $fileName...')),
+        );
+      }
+
+      await OpenFilex.open(localFile.path);
+    } catch (e) {
+      print('Download error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
       }
     }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Downloading file...')),
-      );
-    }
-
-    final bytes = await supabase.storage
-        .from('channel-files')
-        .download(filePath);
-
-    final downloadsDir = Directory('/storage/emulated/0/Download/ExcellenceTutoring');
-    if (!await downloadsDir.exists()) {
-      await downloadsDir.create(recursive: true);
-    }
-
-    final localFile = File('${downloadsDir.path}/$fileName');
-    await localFile.writeAsBytes(bytes);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved to Downloads: $fileName')),
-      );
-    }
-
-    await OpenFilex.open(localFile.path);
-  } catch (e) {
-    print('Download error: $e');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
-    }
-  }
-}
-
-  Future<void> _loadMessages() async {
-    final data = await supabase
-        .from('messages')
-        .select()
-        .eq('student_id', widget.studentId)
-        .order('created_at', ascending: true);
-
-    setState(() => _messages = List<Map<String, dynamic>>.from(data));
-    _scrollToBottom();
   }
 
   void _subscribeToMessages() {
@@ -105,23 +79,33 @@ Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
         .from('messages')
         .stream(primaryKey: ['id'])
         .eq('student_id', widget.studentId)
-        .order('created_at', ascending: true)
+        .order('created_at', ascending: false)
         .listen((data) {
           setState(() => _messages = List<Map<String, dynamic>>.from(data));
-          _scrollToBottom();
         });
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+  String _formatDateTime(String? isoString) {
+    if (isoString == null) return '';
+    final dt = DateTime.parse(isoString).toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final msgDay = DateTime(dt.year, dt.month, dt.day);
+
+    final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    final minute = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour < 12 ? 'AM' : 'PM';
+    final time = '$hour:$minute $period';
+
+    if (msgDay == today) {
+      return 'Today $time';
+    } else if (msgDay == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday $time';
+    } else {
+      final months = ['Jan','Feb','Mar','Apr','May','Jun',
+                      'Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${dt.year == now.year ? "" : "${dt.year} "}${months[dt.month - 1]} ${dt.day}, $time';
+    }
   }
 
   Future<void> _sendTextMessage() async {
@@ -133,15 +117,13 @@ Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
 
     try {
       final adminId = supabase.auth.currentUser!.id;
-      final newMessage = {
+      await supabase.from('messages').insert({
         'student_id': widget.studentId,
         'sent_by': adminId,
         'sender_role': 'admin',
         'text_content': text,
         'created_at': DateTime.now().toIso8601String(),
-      };
-
-      await supabase.from('messages').insert(newMessage);
+      });
     } catch (e) {
       print('Send error: $e');
       if (mounted) {
@@ -169,21 +151,17 @@ Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
       final filePath = '$adminId/$fileName';
 
-      await supabase.storage
-          .from('channel-files')
-          .upload(filePath, file);
+      await supabase.storage.from('channel-files').upload(filePath, file);
 
-      final newMessage = {
-        'student_id': widget.studentId,  // was adminId, now correct
+      await supabase.from('messages').insert({
+        'student_id': widget.studentId,
         'sent_by': adminId,
         'sender_role': 'admin',
         'file_name': picked.name,
         'file_path': filePath,
         'file_type': 'image',
         'created_at': DateTime.now().toIso8601String(),
-      };
-
-      await supabase.from('messages').insert(newMessage);
+      });
     } catch (e) {
       print('Image send error: $e');
       if (mounted) {
@@ -195,49 +173,46 @@ Future<void> _downloadAndOpenFile(String filePath, String fileName) async {
       if (mounted) setState(() => _isSending = false);
     }
   }
-Future<void> _sendFile() async {
-  const typeGroup = XTypeGroup(
-    label: 'files',
-    extensions: ['pdf', 'doc', 'docx', 'txt'],
-  );
 
-  final file = await openFile(acceptedTypeGroups: [typeGroup]);
-  if (file == null) return;
+  Future<void> _sendFile() async {
+    const typeGroup = XTypeGroup(
+      label: 'files',
+      extensions: ['pdf', 'doc', 'docx', 'txt'],
+    );
 
-  setState(() => _isSending = true);
+    final file = await openFile(acceptedTypeGroups: [typeGroup]);
+    if (file == null) return;
 
-  try {
-    final adminId = supabase.auth.currentUser!.id;
-    final bytes = await file.readAsBytes();
-    final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
-    final filePath = '$adminId/$fileName';
+    setState(() => _isSending = true);
 
-    await supabase.storage
-        .from('channel-files')
-        .uploadBinary(filePath, bytes);
+    try {
+      final adminId = supabase.auth.currentUser!.id;
+      final bytes = await file.readAsBytes();
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+      final filePath = '$adminId/$fileName';
 
-    final newMessage = {
-      'student_id': widget.studentId,  // was adminId, now correct
-      'sent_by': adminId,
-      'sender_role': 'admin',
-      'file_name': file.name,
-      'file_path': filePath,
-      'file_type': 'file',
-      'created_at': DateTime.now().toIso8601String(),
-    };
+      await supabase.storage.from('channel-files').uploadBinary(filePath, bytes);
 
-    await supabase.from('messages').insert(newMessage);
-  } catch (e) {
-    print('File send error: $e');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      await supabase.from('messages').insert({
+        'student_id': widget.studentId,
+        'sent_by': adminId,
+        'sender_role': 'admin',
+        'file_name': file.name,
+        'file_path': filePath,
+        'file_type': 'file',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('File send error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSending = false);
     }
-  } finally {
-    if (mounted) setState(() => _isSending = false);
   }
-}
 
   Future<String> _getSignedUrl(String filePath) async {
     final response = await supabase.storage
@@ -249,10 +224,8 @@ Future<void> _sendFile() async {
   Widget _buildMessage(Map<String, dynamic> message) {
     final isAdmin = message['sender_role'] == 'admin';
     final hasText = message['text_content'] != null;
-    final hasImage =
-        message['file_type'] == 'image' && message['file_path'] != null;
+    final hasImage = message['file_type'] == 'image' && message['file_path'] != null;
     final hasFile = message['file_type'] == 'file' && message['file_path'] != null;
-
 
     return Align(
       alignment: isAdmin ? Alignment.centerRight : Alignment.centerLeft,
@@ -330,6 +303,17 @@ Future<void> _sendFile() async {
                     fontSize: 15,
                   ),
                 ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.bottomRight,
+                child: Text(
+                  _formatDateTime(message['created_at']),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isAdmin ? Colors.white70 : Colors.black45,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -365,6 +349,7 @@ Future<void> _sendFile() async {
                     )
                   : ListView.builder(
                       controller: _scrollController,
+                      reverse: true,
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: _messages.length,
                       itemBuilder: (context, index) =>
@@ -389,7 +374,6 @@ Future<void> _sendFile() async {
                     icon: const Icon(Icons.photo_outlined, color: Colors.blue),
                     onPressed: _isSending ? null : _sendImage,
                   ),
-                  // Attach file button
                   IconButton(
                     icon: const Icon(Icons.attach_file, color: Colors.blue),
                     onPressed: _isSending ? null : _sendFile,
@@ -412,6 +396,7 @@ Future<void> _sendFile() async {
                       ),
                       textCapitalization: TextCapitalization.sentences,
                       maxLines: null,
+                      onSubmitted: (_) => _sendTextMessage(),
                     ),
                   ),
                   IconButton(

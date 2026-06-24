@@ -80,19 +80,22 @@ String _formatTime(String? isoString) {
   if (isoString == null) return '';
   final dt = DateTime.parse(isoString).toLocal();
   final now = DateTime.now();
-  final diff = now.difference(dt);
+  final today = DateTime(now.year, now.month, now.day);
+  final msgDay = DateTime(dt.year, dt.month, dt.day);
 
-  final hour = dt.hour > 12 ? dt.hour - 12 : dt.hour == 0 ? 12 : dt.hour;
+  final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
   final min = dt.minute.toString().padLeft(2, '0');
-  final amPm = dt.hour >= 12 ? 'PM' : 'AM';
+  final amPm = dt.hour < 12 ? 'AM' : 'PM';
   final timeStr = '$hour:$min $amPm';
 
-  if (diff.inDays == 0) {
+  if (msgDay == today) {
     return timeStr;
-  } else if (diff.inDays == 1) {
+  } else if (msgDay == today.subtract(const Duration(days: 1))) {
     return 'Yesterday $timeStr';
   } else {
-    return '${dt.day}/${dt.month}/${dt.year} $timeStr';
+    final months = ['Jan','Feb','Mar','Apr','May','Jun',
+                    'Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${dt.year == now.year ? "" : "${dt.year} "}${months[dt.month - 1]} ${dt.day}';
   }
 }
 
