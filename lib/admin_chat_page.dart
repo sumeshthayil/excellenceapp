@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class AdminChatPage extends StatefulWidget {
   final String studentId;
@@ -46,7 +47,6 @@ class _AdminChatPageState extends State<AdminChatPage> {
           .from('channel-files')
           .download(filePath);
 
-      // Use app cache directory — no permissions needed on any Android version
       final cacheDir = Directory(
         '${(await getTemporaryDirectory()).path}/ExcellenceTutoring',
       );
@@ -54,7 +54,8 @@ class _AdminChatPageState extends State<AdminChatPage> {
         await cacheDir.create(recursive: true);
       }
 
-      final localFile = File('${cacheDir.path}/$fileName');
+      final safeFileName = filePath.replaceAll('/', '_');
+      final localFile = File('${cacheDir.path}/$safeFileName');
       await localFile.writeAsBytes(bytes);
 
       if (mounted) {
@@ -66,6 +67,43 @@ class _AdminChatPageState extends State<AdminChatPage> {
       await OpenFilex.open(localFile.path);
     } catch (e) {
       print('Download error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _shareFile(String filePath, String fileName) async {
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Preparing file to share...')),
+        );
+      }
+
+      final bytes = await supabase.storage
+          .from('channel-files')
+          .download(filePath);
+
+      final cacheDir = Directory(
+        '${(await getTemporaryDirectory()).path}/ExcellenceTutoring',
+      );
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+
+      final safeFileName = filePath.replaceAll('/', '_');
+      final localFile = File('${cacheDir.path}/$safeFileName');
+      await localFile.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(localFile.path, name: fileName)],
+        subject: fileName,
+      );
+    } catch (e) {
+      print('Share error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e')),
@@ -270,30 +308,46 @@ class _AdminChatPageState extends State<AdminChatPage> {
                   },
                 ),
               if (hasFile)
-                GestureDetector(
-                  onTap: () => _downloadAndOpenFile(
-                    message['file_path'],
-                    message['file_name'] ?? 'file',
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.insert_drive_file_outlined,
-                        color: isAdmin ? Colors.white : Colors.blue,
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => _downloadAndOpenFile(
+                        message['file_path'],
+                        message['file_name'] ?? 'file',
                       ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          message['file_name'] ?? 'File',
-                          style: TextStyle(
-                            color: isAdmin ? Colors.white : Colors.black87,
-                            decoration: TextDecoration.underline,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.insert_drive_file_outlined,
+                            color: isAdmin ? Colors.white : Colors.blue, // isAdmin for admin file
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              message['file_name'] ?? 'File',
+                              style: TextStyle(
+                                color: isAdmin ? Colors.white : Colors.black87,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => _shareFile(
+                        message['file_path'],
+                        message['file_name'] ?? 'file',
+                      ),
+                      child: Icon(
+                        Icons.share,
+                        size: 18,
+                        color: isAdmin ? Colors.white70 : Colors.blue, // isAdmin for admin file
+                      ),
+                    ),
+                  ],
                 ),
               if (hasText)
                 Text(
