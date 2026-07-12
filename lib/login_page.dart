@@ -50,6 +50,8 @@ class _LoginPageState extends State<LoginPage> {
         if (mounted) {
           if (role == 'admin') {
             Navigator.pushReplacementNamed(context, '/admin');
+          } else if (role == 'tutor') {
+            Navigator.pushReplacementNamed(context, '/tutor');
           } else {
             Navigator.pushReplacementNamed(context, '/student');
           }

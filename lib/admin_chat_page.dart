@@ -10,11 +10,15 @@ import 'package:share_plus/share_plus.dart';
 class AdminChatPage extends StatefulWidget {
   final String studentId;
   final String studentName;
+  // 'admin' or 'tutor' — who is viewing this chat page right now.
+  // Drives which side bubbles land on and whether a sender name is shown.
+  final String viewerRole;
 
   const AdminChatPage({
     super.key,
     required this.studentId,
     required this.studentName,
+    required this.viewerRole,
   });
 
   @override
@@ -28,6 +32,9 @@ class _AdminChatPageState extends State<AdminChatPage> {
   final _imagePicker = ImagePicker();
   bool _isSending = false;
   List<Map<String, dynamic>> _messages = [];
+
+  // Cache of tutor_id -> full_name, so we don't re-fetch on every rebuild.
+  final Map<String, String> _tutorNameCache = {};
 
   @override
   void initState() {
@@ -154,13 +161,12 @@ class _AdminChatPageState extends State<AdminChatPage> {
     _messageController.clear();
 
     try {
-      final adminId = supabase.auth.currentUser!.id;
+      final senderId = supabase.auth.currentUser!.id;
       await supabase.from('messages').insert({
         'student_id': widget.studentId,
-        'sent_by': adminId,
-        'sender_role': 'admin',
+        'sent_by': senderId,
+        'sender_role': widget.viewerRole, // 'admin' or 'tutor'
         'text_content': text,
-        'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
       print('Send error: $e');
@@ -184,21 +190,20 @@ class _AdminChatPageState extends State<AdminChatPage> {
     setState(() => _isSending = true);
 
     try {
-      final adminId = supabase.auth.currentUser!.id;
+      final senderId = supabase.auth.currentUser!.id;
       final file = File(picked.path);
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
-      final filePath = '$adminId/$fileName';
+      final filePath = '$senderId/$fileName';
 
       await supabase.storage.from('channel-files').upload(filePath, file);
 
       await supabase.from('messages').insert({
         'student_id': widget.studentId,
-        'sent_by': adminId,
-        'sender_role': 'admin',
+        'sent_by': senderId,
+        'sender_role': widget.viewerRole,
         'file_name': picked.name,
         'file_path': filePath,
         'file_type': 'image',
-        'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
       print('Image send error: $e');
@@ -224,21 +229,20 @@ class _AdminChatPageState extends State<AdminChatPage> {
     setState(() => _isSending = true);
 
     try {
-      final adminId = supabase.auth.currentUser!.id;
+      final senderId = supabase.auth.currentUser!.id;
       final bytes = await file.readAsBytes();
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
-      final filePath = '$adminId/$fileName';
+      final filePath = '$senderId/$fileName';
 
       await supabase.storage.from('channel-files').uploadBinary(filePath, bytes);
 
       await supabase.from('messages').insert({
         'student_id': widget.studentId,
-        'sent_by': adminId,
-        'sender_role': 'admin',
+        'sent_by': senderId,
+        'sender_role': widget.viewerRole,
         'file_name': file.name,
         'file_path': filePath,
         'file_type': 'file',
-        'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
       print('File send error: $e');
@@ -259,118 +263,193 @@ class _AdminChatPageState extends State<AdminChatPage> {
     return response;
   }
 
+  // Looks up (and caches) a tutor's display name from the profiles table.
+  Future<String> _getTutorName(String tutorId) async {
+    if (_tutorNameCache.containsKey(tutorId)) {
+      return _tutorNameCache[tutorId]!;
+    }
+    try {
+      final data = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', tutorId)
+          .single();
+      final name = (data['full_name'] as String?) ?? 'Tutor';
+      _tutorNameCache[tutorId] = name;
+      return name;
+    } catch (e) {
+      return 'Tutor';
+    }
+  }
+
+  // Decides bubble side + whether to show a sender name, based on:
+  // - who is viewing (widget.viewerRole)
+  // - who sent the message (sender_role, sent_by)
+  ({bool isRight, bool showName}) _bubblePlacement(Map<String, dynamic> message) {
+    final senderRole = message['sender_role'];
+    final sentBy = message['sent_by'];
+    final currentUserId = supabase.auth.currentUser?.id;
+
+    if (widget.viewerRole == 'tutor') {
+      // Student -> left. All staff (self, other tutors, admin) -> right, no name.
+      return (isRight: senderRole != 'student', showName: false);
+    }
+
+    // Admin viewer.
+    if (senderRole == 'student') {
+      return (isRight: false, showName: false);
+    }
+    if (sentBy == currentUserId) {
+      // Own message -> right, no name.
+      return (isRight: true, showName: false);
+    }
+    if (senderRole == 'tutor') {
+      // Another tutor's message -> right, with name shown.
+      return (isRight: true, showName: true);
+    }
+    // Fallback (e.g. another admin account) -> right, no name.
+    return (isRight: true, showName: false);
+  }
+
   Widget _buildMessage(Map<String, dynamic> message) {
-    final isAdmin = message['sender_role'] == 'admin';
+    final placement = _bubblePlacement(message);
+    final isRight = placement.isRight;
+    final showName = placement.showName;
+    final sentBy = message['sent_by'];
+
     final hasText = message['text_content'] != null;
     final hasImage = message['file_type'] == 'image' && message['file_path'] != null;
     final hasFile = message['file_type'] == 'file' && message['file_path'] != null;
 
     return Align(
-      alignment: isAdmin ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: isAdmin ? Colors.blue : Colors.grey[200],
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isAdmin ? 16 : 4),
-            bottomRight: Radius.circular(isAdmin ? 4 : 16),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (hasImage)
-                FutureBuilder<String>(
-                  future: _getSignedUrl(message['file_path']),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return const SizedBox(
-                        height: 150,
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
-                    return ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        snapshot.data!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const Icon(Icons.broken_image),
-                      ),
-                    );
-                  },
-                ),
-              if (hasFile)
-                Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () => _downloadAndOpenFile(
-                        message['file_path'],
-                        message['file_name'] ?? 'file',
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.insert_drive_file_outlined,
-                            color: isAdmin ? Colors.white : Colors.blue, // isAdmin for admin file
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              message['file_name'] ?? 'File',
-                              style: TextStyle(
-                                color: isAdmin ? Colors.white : Colors.black87,
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+      alignment: isRight ? Alignment.centerRight : Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment:
+            isRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          if (showName)
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 2),
+              child: FutureBuilder<String>(
+                future: _getTutorName(sentBy),
+                builder: (context, snapshot) {
+                  return Text(
+                    snapshot.data ?? '...',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[600],
                     ),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () => _shareFile(
-                        message['file_path'],
-                        message['file_name'] ?? 'file',
-                      ),
-                      child: Icon(
-                        Icons.share,
-                        size: 18,
-                        color: isAdmin ? Colors.white70 : Colors.blue, // isAdmin for admin file
-                      ),
-                    ),
-                  ],
-                ),
-              if (hasText)
-                Text(
-                  message['text_content'],
-                  style: TextStyle(
-                    color: isAdmin ? Colors.white : Colors.black87,
-                    fontSize: 15,
-                  ),
-                ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Text(
-                  _formatDateTime(message['created_at']),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isAdmin ? Colors.white70 : Colors.black45,
-                  ),
-                ),
+                  );
+                },
               ),
-            ],
+            ),
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
+            ),
+            decoration: BoxDecoration(
+              color: isRight ? Colors.blue : Colors.grey[200],
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: Radius.circular(isRight ? 16 : 4),
+                bottomRight: Radius.circular(isRight ? 4 : 16),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (hasImage)
+                    FutureBuilder<String>(
+                      future: _getSignedUrl(message['file_path']),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return const SizedBox(
+                            height: 150,
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            snapshot.data!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Icon(Icons.broken_image),
+                          ),
+                        );
+                      },
+                    ),
+                  if (hasFile)
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => _downloadAndOpenFile(
+                            message['file_path'],
+                            message['file_name'] ?? 'file',
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.insert_drive_file_outlined,
+                                color: isRight ? Colors.white : Colors.blue,
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  message['file_name'] ?? 'File',
+                                  style: TextStyle(
+                                    color: isRight ? Colors.white : Colors.black87,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: () => _shareFile(
+                            message['file_path'],
+                            message['file_name'] ?? 'file',
+                          ),
+                          child: Icon(
+                            Icons.share,
+                            size: 18,
+                            color: isRight ? Colors.white70 : Colors.blue,
+                          ),
+                        ),
+                      ],
+                    ),
+                  if (hasText)
+                    Text(
+                      message['text_content'],
+                      style: TextStyle(
+                        color: isRight ? Colors.white : Colors.black87,
+                        fontSize: 15,
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.bottomRight,
+                    child: Text(
+                      _formatDateTime(message['created_at']),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isRight ? Colors.white70 : Colors.black45,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

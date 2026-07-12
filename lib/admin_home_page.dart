@@ -179,6 +179,7 @@ String _formatTime(String? isoString) {
                             builder: (context) => AdminChatPage(
                               studentId: student['id'],
                               studentName: student['full_name'],
+                              viewerRole: 'admin',
                             ),
                           ),
                         );

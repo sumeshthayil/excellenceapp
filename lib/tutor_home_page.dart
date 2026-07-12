@@ -202,6 +202,7 @@ Future<void> _loadStudents() async {
                             builder: (context) => AdminChatPage(
                               studentId: student['id'],
                               studentName: student['full_name'],
+                              viewerRole: 'tutor',
                             ),
                           ),
                         );
