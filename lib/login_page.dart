@@ -57,10 +57,12 @@ class _LoginPageState extends State<LoginPage> {
       }
     } on AuthException catch (e) {
       setState(() => _errorMessage = e.message);
+      _isLoading = false;
     } catch (e, stackTrace) {
       print('Login error: $e');
       print('Stack trace: $stackTrace');
       setState(() => _errorMessage = 'Error: $e');
+      _isLoading = false;
     }
   }
 

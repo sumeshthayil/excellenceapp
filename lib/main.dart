@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_page.dart';
 import 'student_chat_page.dart';
 import 'admin_home_page.dart';
+import 'tutor_home_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +33,7 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginPage(),
         '/student': (context) => const StudentChatPage(),
         '/admin': (context) => const AdminHomePage(),
+        '/tutor': (context) => const TutorHomePage(),
       },
     );
   }
@@ -79,6 +81,8 @@ class _AuthGateState extends State<AuthGate> {
 
     if (role == 'admin') {
       Navigator.of(context).pushReplacementNamed('/admin');
+    } else if (role == 'tutor') {
+      Navigator.of(context).pushReplacementNamed('/tutor');
     } else {
       Navigator.of(context).pushReplacementNamed('/student');
     }
